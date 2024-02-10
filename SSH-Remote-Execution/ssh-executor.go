@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"flag"
 	"fmt"
 	"golang.org/x/crypto/ssh"
@@ -9,36 +10,54 @@ import (
 )
 
 func main() {
-	// Define command-line flags for server IP, private key file, and command
+	// Define command-line flags for server IP, username, authentication method, and command
 	serverIP := flag.String("server", "", "Server IP address")
-	username := flag.String("username","","User Name")
-	privateKeyFile := flag.String("key", "", "Private key file")
+	username := flag.String("username", "", "User Name")
+	password := flag.String("password", "", "Password for SSH authentication")
+	privateKeyFile := flag.String("key", "", "Private key file for SSH authentication")
 	command := flag.String("command", "", "Command to execute on the server")
+
+	// Set up custom usage message
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options]\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Options:\n")
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
-	// Check if server IP, private key file, and command are provided
-	if *serverIP == "" || *privateKeyFile == "" || *command == "" || *username == "" {
-		log.Fatal("Server IP, private key file, and command must be provided")
+	// Check if server IP, username, authentication method, and command are provided
+	if *serverIP == "" || *username == "" || (*password == "" && *privateKeyFile == "") || *command == "" {
+		log.Fatal("Server IP, username, authentication method (password or private key file), and command must be provided")
 	}
 
-	// Read private key file
-	key, err := ioutil.ReadFile(*privateKeyFile)
-	if err != nil {
-		log.Fatalf("Failed to read private key file: %s", err)
-	}
+	var authMethods []ssh.AuthMethod
 
-	// Parse private key
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		log.Fatalf("Failed to parse private key: %s", err)
+	// Use password authentication if a password is provided
+	if *password != "" {
+		authMethods = append(authMethods, ssh.Password(*password))
+	} else if *privateKeyFile != "" { // Use private key authentication if a private key file is provided
+		// Read private key file
+		key, err := ioutil.ReadFile(*privateKeyFile)
+		if err != nil {
+			log.Fatalf("Failed to read private key file: %s", err)
+		}
+
+		// Parse private key
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			log.Fatalf("Failed to parse private key: %s", err)
+		}
+
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	} else {
+		log.Fatal("Either password or private key file must be provided for authentication")
 	}
 
 	// SSH client configuration
 	config := &ssh.ClientConfig{
-		User: *username, // Update with your username
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
+		User: *username,
+		Auth: authMethods,
 		// Specify HostKeyCallback function
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // InsecureIgnoreHostKey ignores all host key checks
 		// You should use a more secure HostKeyCallback in a production environment.
